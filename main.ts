@@ -85,3 +85,16 @@ try {
 } catch (err) {
   fail(`VIDEO.json could not be copied to ${OUTPUT_DIR}: ${(err as Error).message}`);
 }
+
+// Verify the copy before finishing: the bytes in the output directory
+// must be exactly the bytes that were validated above, so read the copy
+// back and compare it with the repository file.
+let verified = false;
+try {
+  verified = readFileSync(join(OUTPUT_DIR, 'VIDEO.json')).equals(readFileSync(sourcePath));
+} catch {
+  verified = false;
+}
+if (!verified) {
+  fail('VIDEO.json copy verification failed: the output could not be confirmed identical to the repository file.');
+}
