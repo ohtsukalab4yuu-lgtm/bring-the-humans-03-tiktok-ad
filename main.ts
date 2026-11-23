@@ -1,98 +1,104 @@
-// main.ts — entry program for make.fun's "bring-the-humans-03" bounty
+// main.ts — the entry program for the make.fun bounty "bring-the-humans-03"
 // ("Bring the humans with a TikTok ad").
 //
-// The entry itself is a video: an original 18-second vertical TikTok ad
-// for make.fun, created and rendered by an AI agent in its recorded
-// session and posted publicly on TikTok. Places in the bounty are ranked
-// by the video's views, so the video is what gets judged; this program
-// only delivers the video's address to the grader.
+// What this entry is
+// ------------------
+// The entry itself is a video: an 18-second vertical TikTok ad for
+// make.fun, conceived, written and rendered by an AI agent and posted
+// publicly on TikTok. The ad closes on make.fun's official referral end
+// card with the referral code xnxrr525 entered in its field, and the
+// caption posted with the video carries the play code
+// makefun-frame-easel-blizzard.
 //
-// Its single job: read VIDEO.json at the repository root, check that the
-// file is well formed and that its "url" really is a TikTok video
-// address, then copy the file byte for byte into the output directory.
-// A SHA-256 comparison afterwards proves the copy is exact.
+// What this program does
+// ----------------------
+// Almost nothing, on purpose. The grader reads the video's address from a
+// file called VIDEO.json, so this program's only job is to validate the
+// VIDEO.json sitting in the bot directory and then copy it, byte for
+// byte, into the output directory. It uses nothing beyond the Node
+// standard library, opens no network connection, and consults no clock
+// or random source, so the same input always produces the same output.
 //
-// Properties the grader relies on:
-//   - Node 22, standard library only (node:fs, node:path, node:crypto).
-//   - No network access, no clock, no randomness: the output depends
-//     only on the bytes of VIDEO.json, so two runs agree exactly.
-//   - Reads nothing outside the bot directory and the output directory.
-//
-// Local run (the two variables stand in for the grader's /bot and
-// /output directories):
-//
-//   mkdir -p out && MAKEFUN_BOT_DIR=. MAKEFUN_OUTPUT_DIR=out node main.ts
+// Environment:
+//   MAKEFUN_BOT_DIR    where VIDEO.json is read from   (default /bot)
+//   MAKEFUN_OUTPUT_DIR where VIDEO.json is written to  (default /output)
 
+import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 
-const BOT_DIR = process.env.MAKEFUN_BOT_DIR ?? '/bot';
-const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const botDir = process.env.MAKEFUN_BOT_DIR ?? '/bot';
+const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-// Every failure path ends here: one clear line on stderr and a non-zero
-// exit, so a malformed entry fails loudly instead of confusing the gate.
-function fail(message: string): never {
+// The only address shape this entry accepts: a public TikTok video page,
+// https://www.tiktok.com/@<handle>/video/<numeric id>.
+const TIKTOK_VIDEO_PATTERN = /^https:\/\/www\.tiktok\.com\/@[A-Za-z0-9._]+\/video\/\d+$/;
+
+// Every failure in this program ends the same way: one plain message on
+// stderr and exit code 1, so a bad entry file is impossible to miss.
+function die(message: string): never {
   console.error(`main.ts: ${message}`);
   process.exit(1);
 }
 
-function sha256(bytes: Buffer): string {
+function sha256Hex(bytes: Buffer): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-// --- Read and validate VIDEO.json --------------------------------------
-// Validation happens before anything is copied: the file must parse as
-// JSON, be a plain object, and carry a "url" string that matches the
-// shape of a public TikTok video address,
-// https://www.tiktok.com/@<handle>/video/<numeric id>.
-const sourcePath = join(BOT_DIR, 'VIDEO.json');
-let sourceBytes: Buffer;
-try {
-  sourceBytes = readFileSync(sourcePath);
-} catch (err) {
-  fail(`cannot read VIDEO.json at ${sourcePath}: ${(err as Error).message}`);
+// Read VIDEO.json and check it before anything is copied: the file must
+// parse as JSON, the parsed value must be a plain object, and its "url"
+// property must be a TikTok video address. Returns the validated URL.
+function readVideoUrl(filePath: string): string {
+  let text: string;
+  try {
+    text = readFileSync(filePath, 'utf8');
+  } catch (err) {
+    die(`VIDEO.json could not be read at ${filePath}: ${(err as Error).message}`);
+  }
+
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    die(`VIDEO.json is not valid JSON: ${(err as Error).message}`);
+  }
+
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    die('VIDEO.json must contain one JSON object.');
+  }
+
+  const url = (data as Record<string, unknown>).url;
+  if (typeof url !== 'string' || !TIKTOK_VIDEO_PATTERN.test(url)) {
+    die(
+      'VIDEO.json "url" must be a TikTok video address like ' +
+        'https://www.tiktok.com/@someone/video/1234567890.',
+    );
+  }
+  return url;
 }
 
-let parsed: unknown;
-try {
-  parsed = JSON.parse(sourceBytes.toString('utf8'));
-} catch (err) {
-  fail(`VIDEO.json is not valid JSON: ${(err as Error).message}`);
+// Validate first, then copy, then prove the copy. The copy step is a
+// plain byte copy; the proof step re-reads both files and compares their
+// SHA-256 digests, so the program only succeeds when the grader's copy
+// is exactly the file that passed validation.
+function run(): void {
+  const sourcePath = join(botDir, 'VIDEO.json');
+  const targetPath = join(outputDir, 'VIDEO.json');
+
+  readVideoUrl(sourcePath);
+
+  try {
+    mkdirSync(outputDir, { recursive: true });
+    copyFileSync(sourcePath, targetPath);
+  } catch (err) {
+    die(`VIDEO.json could not be copied to ${targetPath}: ${(err as Error).message}`);
+  }
+
+  const sourceDigest = sha256Hex(readFileSync(sourcePath));
+  const copiedDigest = sha256Hex(readFileSync(targetPath));
+  if (sourceDigest !== copiedDigest) {
+    die('copy verification failed: the output VIDEO.json differs from the source file.');
+  }
 }
 
-if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-  fail('VIDEO.json must be a JSON object with a "url" field.');
-}
-
-const url = (parsed as { url?: unknown }).url;
-const TIKTOK_VIDEO = /^https:\/\/www\.tiktok\.com\/@[^/]+\/video\/\d+$/;
-if (typeof url !== 'string' || !TIKTOK_VIDEO.test(url)) {
-  fail('VIDEO.json "url" must be a TikTok video address like https://www.tiktok.com/@handle/video/1234567890.');
-}
-
-// --- Copy, then prove the copy is exact --------------------------------
-// The copy itself is a plain byte copy. Afterwards the SHA-256 of the
-// file in the output directory must equal the SHA-256 of the validated
-// source bytes; if they differ, the entry fails here rather than at the
-// gate.
-const outputPath = join(OUTPUT_DIR, 'VIDEO.json');
-try {
-  mkdirSync(OUTPUT_DIR, { recursive: true });
-  copyFileSync(sourcePath, outputPath);
-} catch (err) {
-  fail(`cannot copy VIDEO.json to ${outputPath}: ${(err as Error).message}`);
-}
-
-let copiedBytes: Buffer;
-try {
-  copiedBytes = readFileSync(outputPath);
-} catch (err) {
-  fail(`cannot read back the copied VIDEO.json at ${outputPath}: ${(err as Error).message}`);
-}
-
-if (sha256(copiedBytes) !== sha256(sourceBytes)) {
-  fail('copy verification failed: the VIDEO.json in the output directory differs from the repository file.');
-}
-
-console.log(`main.ts: VIDEO.json delivered to ${outputPath} (sha256 ${sha256(sourceBytes)}).`);
+run();
