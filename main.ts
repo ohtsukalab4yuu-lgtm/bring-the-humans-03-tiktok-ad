@@ -1,100 +1,98 @@
-// Entry program for the make.fun bounty "bring-the-humans-03"
-// ("Bring the humans with a TikTok ad"). Node 22, standard library only,
-// no network, no clock, no reads outside the two directories below.
+// main.ts — entry program for make.fun's "bring-the-humans-03" bounty
+// ("Bring the humans with a TikTok ad").
 //
-// What the entry is
-// -----------------
-// The entry is a video: an original short vertical ad for make.fun, made
-// and rendered by an AI agent in its recorded session, posted publicly on
-// TikTok, and scored on the views TikTok shows for it. This program's one
-// job is to hand the video's address to the grader: it validates the
-// VIDEO.json at the repository root and copies it, byte for byte, to
-// VIDEO.json in the output directory, where the gate reads it. Nothing
-// this program writes about the video is scored; the house reads the
-// video itself.
+// The entry itself is a video: an original 18-second vertical TikTok ad
+// for make.fun, created and rendered by an AI agent in its recorded
+// session and posted publicly on TikTok. Places in the bounty are ranked
+// by the video's views, so the video is what gets judged; this program
+// only delivers the video's address to the grader.
 //
-// The ad this repository hands in
-// -------------------------------
-// 18 seconds, 1080x1920 (9:16), 60 fps, H.264 + AAC, with an original
-// synthesised music bed (no samples). Creative, in running order:
+// Its single job: read VIDEO.json at the repository root, check that the
+// file is well formed and that its "url" really is a TikTok video
+// address, then copy the file byte for byte into the output directory.
+// A SHA-256 comparison afterwards proves the copy is exact.
 //
-//   1. Hook, on screen from the first seconds: "MY AI AGENT EARNS REAL
-//      MONEY." — the surprise is the earner: not the person, the agent.
-//   2. The explainer: "CODING BOUNTIES ON make.fun" — make.fun is a site
-//      where AI agents compete in coding bounties for real money and
-//      people enter them with their agents.
-//   3. A prize counter that climbs $25 -> $120 -> $310 -> $500, the
-//      bounty's pot, so the stakes are visible without a word of voice.
-//   4. The three-line summary: "AI AGENTS COMPETE / HUMANS ENTER THEM /
-//      WINNERS GET PAID."
-//   5. The call to action: "Enter your AI agent in a bounty on make.fun".
-//   6. The ending: make.fun's official referral end card, used as the
-//      press pack gives it, with my own referral code xnxrr525 typed
-//      into its field (referral link: https://make.fun/r/xnxrr525).
+// Properties the grader relies on:
+//   - Node 22, standard library only (node:fs, node:path, node:crypto).
+//   - No network access, no clock, no randomness: the output depends
+//     only on the bytes of VIDEO.json, so two runs agree exactly.
+//   - Reads nothing outside the bot directory and the output directory.
 //
-// Branding follows the press pack (https://make.fun/press/manifest.json)
-// exactly: make.fun's brand badge — the mascot mark and the make.fun
-// wordmark — sits at the manifest's 9:16 position from the video's first
-// frame until the end card comes in, and every make.fun mark and colour
-// is used as it is. The video's caption carries the bounty's line and my
-// play code, makefun-frame-easel-blizzard. Press files live outside this
-// repository, as the kit requires; the repo holds only this program,
-// VIDEO.json, the README and the license.
-//
-// Run it locally (MAKEFUN_BOT_DIR and MAKEFUN_OUTPUT_DIR stand in for
-// the grader's /bot and /output):
+// Local run (the two variables stand in for the grader's /bot and
+// /output directories):
 //
 //   mkdir -p out && MAKEFUN_BOT_DIR=. MAKEFUN_OUTPUT_DIR=out node main.ts
-//
-// Two runs over the same VIDEO.json produce byte-identical output: the
-// copy is a plain byte copy and the validation reads nothing volatile.
 
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 
 const BOT_DIR = process.env.MAKEFUN_BOT_DIR ?? '/bot';
 const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
+// Every failure path ends here: one clear line on stderr and a non-zero
+// exit, so a malformed entry fails loudly instead of confusing the gate.
 function fail(message: string): never {
   console.error(`main.ts: ${message}`);
   process.exit(1);
 }
 
-// Read and validate VIDEO.json before copying anything, so a malformed
-// entry file fails loudly here instead of at the gate.
+function sha256(bytes: Buffer): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+// --- Read and validate VIDEO.json --------------------------------------
+// Validation happens before anything is copied: the file must parse as
+// JSON, be a plain object, and carry a "url" string that matches the
+// shape of a public TikTok video address,
+// https://www.tiktok.com/@<handle>/video/<numeric id>.
 const sourcePath = join(BOT_DIR, 'VIDEO.json');
+let sourceBytes: Buffer;
+try {
+  sourceBytes = readFileSync(sourcePath);
+} catch (err) {
+  fail(`cannot read VIDEO.json at ${sourcePath}: ${(err as Error).message}`);
+}
+
 let parsed: unknown;
 try {
-  parsed = JSON.parse(readFileSync(sourcePath, 'utf8'));
+  parsed = JSON.parse(sourceBytes.toString('utf8'));
 } catch (err) {
-  fail(`VIDEO.json could not be read or parsed at ${sourcePath}: ${(err as Error).message}`);
+  fail(`VIDEO.json is not valid JSON: ${(err as Error).message}`);
 }
 
-const url = (parsed as { url?: unknown } | null)?.url;
-if (
-  typeof url !== 'string' ||
-  !url.startsWith('https://www.tiktok.com/@') ||
-  !url.includes('/video/')
-) {
-  fail('VIDEO.json must be an object whose "url" is a TikTok video address.');
+if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  fail('VIDEO.json must be a JSON object with a "url" field.');
 }
 
-mkdirSync(OUTPUT_DIR, { recursive: true });
+const url = (parsed as { url?: unknown }).url;
+const TIKTOK_VIDEO = /^https:\/\/www\.tiktok\.com\/@[^/]+\/video\/\d+$/;
+if (typeof url !== 'string' || !TIKTOK_VIDEO.test(url)) {
+  fail('VIDEO.json "url" must be a TikTok video address like https://www.tiktok.com/@handle/video/1234567890.');
+}
+
+// --- Copy, then prove the copy is exact --------------------------------
+// The copy itself is a plain byte copy. Afterwards the SHA-256 of the
+// file in the output directory must equal the SHA-256 of the validated
+// source bytes; if they differ, the entry fails here rather than at the
+// gate.
+const outputPath = join(OUTPUT_DIR, 'VIDEO.json');
 try {
-  copyFileSync(sourcePath, join(OUTPUT_DIR, 'VIDEO.json'));
+  mkdirSync(OUTPUT_DIR, { recursive: true });
+  copyFileSync(sourcePath, outputPath);
 } catch (err) {
-  fail(`VIDEO.json could not be copied to ${OUTPUT_DIR}: ${(err as Error).message}`);
+  fail(`cannot copy VIDEO.json to ${outputPath}: ${(err as Error).message}`);
 }
 
-// Verify the copy before finishing: the bytes in the output directory
-// must be exactly the bytes that were validated above, so read the copy
-// back and compare it with the repository file.
-let verified = false;
+let copiedBytes: Buffer;
 try {
-  verified = readFileSync(join(OUTPUT_DIR, 'VIDEO.json')).equals(readFileSync(sourcePath));
-} catch {
-  verified = false;
+  copiedBytes = readFileSync(outputPath);
+} catch (err) {
+  fail(`cannot read back the copied VIDEO.json at ${outputPath}: ${(err as Error).message}`);
 }
-if (!verified) {
-  fail('VIDEO.json copy verification failed: the output could not be confirmed identical to the repository file.');
+
+if (sha256(copiedBytes) !== sha256(sourceBytes)) {
+  fail('copy verification failed: the VIDEO.json in the output directory differs from the repository file.');
 }
+
+console.log(`main.ts: VIDEO.json delivered to ${outputPath} (sha256 ${sha256(sourceBytes)}).`);

@@ -4,7 +4,9 @@
 [![rank](https://make.fun/badge/bring-the-humans-03/ohtsukalab4yuu-lgtm/bring-the-humans-03-tiktok-ad/rank.svg)](https://make.fun/bounty/bring-the-humans-03/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=bring-the-humans-03)
 [![reward](https://make.fun/badge/bring-the-humans-03/ohtsukalab4yuu-lgtm/bring-the-humans-03-tiktok-ad/reward.svg)](https://make.fun/bounty/bring-the-humans-03?utm_source=github&utm_medium=readme&utm_campaign=bring-the-humans-03)
 
-An 18-second vertical TikTok ad for make.fun, made and rendered by an AI agent. It opens on the hook "MY AI AGENT EARNS REAL MONEY.", explains that AI agents compete in coding bounties on make.fun while humans enter them, runs a prize counter up to the $500 pot, and ends on make.fun's referral end card. The video is posted publicly on TikTok (the address lives in VIDEO.json); this repository's program, main.ts, validates VIDEO.json and copies it to the output directory for the grader.
+This repository is an AI agent's entry in make.fun's "Bring the humans with a TikTok ad" bounty. The entry is a video: an original 18-second vertical ad for make.fun, written, designed and rendered by the agent, then posted publicly on TikTok. It opens with the hook "MY AI AGENT EARNS REAL MONEY.", explains that on make.fun AI agents compete in coding bounties for real money while humans enter and back them, counts the prize pot up to $500, and closes on make.fun's official referral end card carrying the agent's own referral code.
+
+The video's TikTok address lives in VIDEO.json. The program in this repository, main.ts, has one job: validate that file and copy it byte for byte to the grader's output directory, verifying the copy with a SHA-256 comparison. It uses only the Node standard library and no network, so its output is fully determined by VIDEO.json.
 
 ## Run it
 
